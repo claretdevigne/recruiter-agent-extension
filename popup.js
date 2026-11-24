@@ -427,6 +427,38 @@ chrome.storage.local.get(
   }
 );
 
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local") return;
+
+  if (changes.selectedSheet?.newValue) {
+    const nuevoRol = changes.selectedSheet.newValue;
+    const existeOpcion = Array.from(sheetSelect?.options || []).some(
+      (opt) => opt.value === nuevoRol
+    );
+
+    if (existeOpcion && sheetSelect.value !== nuevoRol) {
+      [sheetSelect, xrayRoleSelect, dbRoleSelect].forEach((sel) => {
+        if (sel && sel.value !== nuevoRol) {
+          sel.value = nuevoRol;
+        }
+      });
+      cargarConfigDeRol(inputUrl.value.trim(), nuevoRol);
+    }
+  }
+
+  if (changes.batchState) {
+    const st = changes.batchState.newValue;
+    if (st?.active) {
+      btnStart.style.display = "none";
+      btnStop.style.display = "block";
+      setStatus(`⏳ Lote activo en fila ${st.currentRow}...`, "#0a66c2");
+    } else {
+      btnStart.style.display = "block";
+      btnStop.style.display = "none";
+    }
+  }
+});
+
 // Eventos pestaña X-Ray
 xrayCountry.addEventListener("change", reconstruirQueryXray);
 btnXrayAnalyze.addEventListener("click", () => extraerYGuardarXray());
@@ -514,6 +546,7 @@ btnStart.addEventListener("click", async () => {
   const minMatch = parseInt(minMatchInput.value, 10) || 75;
 
   await chrome.storage.local.set({
+    selectedSheet: sheetName,
     minMatch,
     autoCloseTab: chkCloseTab.checked,
     autoConnect: chkConnect.checked,

@@ -161,6 +161,60 @@
     wrapper.style.width = minimizado ? "215px" : "330px";
   });
 
+  // ==========================================================================
+  // SINCRONIZACIÓN AUTOMÁTICA SOLO AL CAMBIAR DE PESTAÑA EN GOOGLE SHEETS
+  // (No pisa la selección manual del usuario)
+  // ==========================================================================
+  let ultimaPestanaSheetDetectada = "";
+
+  function obtenerPestanaActivaEnSheet() {
+    const selectores = [
+      ".docs-sheet-active-tab .docs-sheet-tab-name",
+      ".docs-sheet-active-tab",
+      '[role="tab"][aria-selected="true"] .docs-sheet-tab-name',
+      '[role="tab"][aria-selected="true"]'
+    ];
+
+    for (const sel of selectores) {
+      const el = document.querySelector(sel);
+      if (!el) continue;
+      const texto = (el.textContent || "").trim();
+      if (!texto) continue;
+      const primeraLinea = texto.split("\n")[0].trim();
+      if (primeraLinea && primeraLinea !== "AGENTE_DB") {
+        return primeraLinea;
+      }
+    }
+    return "";
+  }
+
+  function resolverRolCoincidente(nombrePestana, opcionesSelect) {
+    if (!nombrePestana) return "";
+    const valores = Array.from(opcionesSelect).map((o) => o.value).filter(Boolean);
+
+    if (valores.includes(nombrePestana)) return nombrePestana;
+
+    const norm = (s) => s.toLowerCase().replace(/[\s_]+/g, "_").trim();
+    const objetivo = norm(nombrePestana);
+    return valores.find((v) => norm(v) === objetivo) || "";
+  }
+
+  async function revisarCambioPestanaSheet() {
+    const pestanaActual = obtenerPestanaActivaEnSheet();
+    if (!pestanaActual || pestanaActual === ultimaPestanaSheetDetectada) return;
+
+    ultimaPestanaSheetDetectada = pestanaActual;
+
+    const { batchState } = await chrome.storage.local.get(["batchState"]);
+    if (batchState?.active) return;
+
+    const rolMatch = resolverRolCoincidente(pestanaActual, swRole.options);
+    if (rolMatch && swRole.value !== rolMatch) {
+      swRole.value = rolMatch;
+      await chrome.storage.local.set({ selectedSheet: rolMatch });
+    }
+  }
+
   async function cargarRoles(rolPreferido = "") {
     swRole.innerHTML = '<option value="">Cargando...</option>';
     try {
@@ -173,6 +227,10 @@
           rolPreferido && resp.sheets.includes(rolPreferido) ? rolPreferido : resp.sheets[0];
         swRole.value = elegido;
         await chrome.storage.local.set({ selectedSheet: elegido });
+
+        // Sincronizar con la pestaña activa actual del Sheet tras cargar opciones
+        ultimaPestanaSheetDetectada = "";
+        await revisarCambioPestanaSheet();
       } else {
         swRole.innerHTML = `<option value="">${resp?.error || "Sin roles"}</option>`;
       }
@@ -213,7 +271,7 @@
     }
     if (typeof changes.minMatch?.newValue === "number") swMinMatch.value = changes.minMatch.newValue;
     if (typeof changes.autoCloseTab?.newValue === "boolean") swCloseTab.checked = changes.autoCloseTab.newValue;
-    if (typeof changes.autoConnect?.newValue === "boolean") swConnect.checked = changes.autoConnect.newValue;
+    if (typeof changes.autoConnect?.newValue === "boolean") swConnect.checked = changes.autoConnect.checked;
     if (typeof changes.autoRecruiter?.newValue === "boolean") swRecruiter.checked = changes.autoRecruiter.newValue;
     if (typeof changes.dryRunMode?.newValue === "boolean") swDryRun.checked = changes.dryRunMode.newValue;
     if (changes.batchState) {
@@ -233,6 +291,21 @@
   swRole.addEventListener("change", () => {
     chrome.storage.local.set({ selectedSheet: swRole.value });
   });
+
+  const obsPestanas = new MutationObserver(() => {
+    revisarCambioPestanaSheet();
+  });
+
+  if (document.body) {
+    obsPestanas.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["aria-selected", "class"]
+    });
+  }
+
+  setInterval(revisarCambioPestanaSheet, 1500);
 
   swRefresh.addEventListener("click", () => cargarRoles(swRole.value));
 
