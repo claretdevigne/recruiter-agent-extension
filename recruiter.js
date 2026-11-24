@@ -74,6 +74,55 @@ async function esperarElementoPorTexto(selector, regex, timeoutMs = 15000) {
   return null;
 }
 
+function recruiterSigueCargando() {
+  if (document.readyState !== "complete") return true;
+
+  const loadersVisibles = querySelectorAllDeep(
+    '.artdeco-loader, [role="progressbar"], [aria-busy="true"], .loading-icon, .profile-skeleton'
+  ).some(esVisible);
+  if (loadersVisibles) return true;
+
+  const mainEl = document.querySelector("main") || document.body;
+  const textoVisible = (mainEl?.innerText || "").trim();
+  return textoVisible.length < 120;
+}
+
+async function esperarBotonGuardarSinRendirse() {
+  const regexGuardar = /^(Guardar en (un )?proyecto|Save to (a )?project)$/i;
+  const inicio = Date.now();
+  let tiempoConPerfilListoMs = 0;
+  const maxEsperaTotalMs = 180000; // Hasta 3 minutos si la red o Recruiter están lentos
+
+  while (Date.now() - inicio < maxEsperaTotalMs) {
+    const { recruiterTask } = await chrome.storage.local.get(["recruiterTask"]);
+    if (!recruiterTask?.pending) return null;
+
+    const encontrado = buscarElementoPorTexto(
+      "button, a, span, div[role='button']",
+      regexGuardar,
+      true
+    );
+    if (encontrado) return encontrado;
+
+    const segs = Math.floor((Date.now() - inicio) / 1000);
+    if (recruiterSigueCargando()) {
+      tiempoConPerfilListoMs = 0;
+      mostrarEstadoRecruiter(`⏳ Esperando carga de Recruiter (${segs}s)...`, "#0a66c2");
+    } else {
+      tiempoConPerfilListoMs += 600;
+      mostrarEstadoRecruiter(`⏳ Buscando 'Guardar en proyecto' (${segs}s)...`, "#0a66c2");
+      // Solo si el perfil ya terminó de renderizar por completo y lleva 25s estable sin el botón
+      if (tiempoConPerfilListoMs >= 25000) {
+        return null;
+      }
+    }
+
+    await esperar(600);
+  }
+
+  return null;
+}
+
 function clicReal(el) {
   if (!el) return;
   el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
@@ -156,12 +205,8 @@ async function guardarEnProyectoExistente() {
       return;
     }
 
-    mostrarEstadoRecruiter("⏳ Buscando 'Guardar en proyecto'...", "#0a66c2");
-    const nodoGuardar = await esperarElementoPorTexto(
-      "button, a, span, div[role='button']",
-      /^(Guardar en (un )?proyecto|Save to (a )?project)$/i,
-      15000
-    );
+    mostrarEstadoRecruiter("⏳ Esperando carga de Recruiter...", "#0a66c2");
+    const nodoGuardar = await esperarBotonGuardarSinRendirse();
 
     if (!nodoGuardar) {
       mostrarEstadoRecruiter("⚠️ No apareció botón 'Guardar en proyecto'", "#856404");
@@ -176,7 +221,7 @@ async function guardarEnProyectoExistente() {
     const opcionExistente = await esperarElementoPorTexto(
       'label, span, div[role="radio"], button',
       /(Seleccionar (un )?proyecto existente|Proyecto existente|Select (an )?existing project|Existing project)/i,
-      4500
+      6000
     );
 
     if (opcionExistente) {
@@ -198,13 +243,12 @@ async function guardarEnProyectoExistente() {
 
     mostrarEstadoRecruiter(`⏳ Buscando proyecto "${nombreProyecto}"...`, "#0a66c2");
 
-    // Buscar input dentro del modal/diálogo primero, o en todo el DOM visible
     const contenedorModal =
       querySelectorAllDeep('[role="dialog"], .artdeco-modal, [data-test-modal]').find(esVisible) ||
       document;
 
     let inputProyecto = null;
-    for (let intento = 0; intento < 8; intento++) {
+    for (let intento = 0; intento < 15; intento++) {
       const inputsVisibles = querySelectorAllDeep(
         'input[type="text"], input[type="search"], input[role="combobox"], input:not([type])',
         contenedorModal
@@ -218,7 +262,7 @@ async function guardarEnProyectoExistente() {
         ) || inputsVisibles[inputsVisibles.length - 1];
 
       if (inputProyecto) break;
-      await esperar(400);
+      await esperar(500);
     }
 
     if (!inputProyecto) {
@@ -227,7 +271,7 @@ async function guardarEnProyectoExistente() {
     }
 
     escribirEnInputReact(inputProyecto, nombreProyecto);
-    await esperar(2000);
+    await esperar(2200);
 
     const rectInput = inputProyecto.getBoundingClientRect();
     const candidatosLista = querySelectorAllDeep(
@@ -264,7 +308,7 @@ async function guardarEnProyectoExistente() {
     if (!dryRunMode) {
       let btnConfirmar = null;
       const inicioEspera = Date.now();
-      while (Date.now() - inicioEspera < 5000) {
+      while (Date.now() - inicioEspera < 8000) {
         const scope =
           querySelectorAllDeep('[role="dialog"], .artdeco-modal, [data-test-modal]').find(esVisible) ||
           document;
@@ -298,7 +342,6 @@ async function guardarEnProyectoExistente() {
     mostrarEstadoRecruiter(`❌ Error Recruiter: ${err.message.slice(0, 30)}`, "#c92a2a");
   } finally {
     ocultarEstadoRecruiter(3500);
-    // Siempre avisar a background para liberar el candado y avanzar el lote si aplica
     await enviarMensajeExtensionConReintento({
       action: "RECRUITER_DONE",
       guardado: guardadoExitoso
