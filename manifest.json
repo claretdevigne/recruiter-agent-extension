@@ -1,0 +1,72 @@
+{
+  "manifest_version": 3,
+  "name": "LinkedIn AI Recruiter & X-Ray Assistant",
+  "version": "2.1",
+  "description": "Evalúa perfiles de LinkedIn contra JD con IA, automatiza Recruiter/Conexiones y genera búsquedas X-Ray.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://api.openai.com/*",
+    "https://script.google.com/*",
+    "https://script.googleusercontent.com/*",
+    "*://*.linkedin.com/*",
+    "*://*.google.com/*",
+    "*://*.google.com.mx/*",
+    "*://*.google.com.co/*",
+    "*://*.google.com.ar/*",
+    "*://*.google.com.pe/*",
+    "*://*.google.com.cl/*",
+    "*://*.google.es/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.linkedin.com/in/*"],
+      "js": ["extractor.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://*.linkedin.com/talent/*"],
+      "js": ["recruiter.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://docs.google.com/spreadsheets/d/1IgctcXouhK3QRIO-4LDhf4uTOWV8XuM-M7omzqowF6Y/*"
+      ],
+      "js": ["sheets_widget.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "*://*.google.com/search*",
+        "*://*.google.com.mx/search*",
+        "*://*.google.com.co/search*",
+        "*://*.google.com.ar/search*",
+        "*://*.google.com.pe/search*",
+        "*://*.google.com.cl/search*",
+        "*://*.google.es/search*",
+        "*://*.linkedin.com/in/*"
+      ],
+      "js": ["db_badges.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "commands": {
+    "run-extractor": {
+      "suggested_key": {
+        "default": "Alt+Shift+E"
+      },
+      "description": "Ejecutar evaluación en el perfil actual"
+    }
+  }
+}

@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { box-sizing: border-box; }
+    body { width: 380px; font-family: system-ui, sans-serif; margin: 0; color: #222; background: #fff; }
+    .tabs { display: flex; background: #f1f3f5; border-bottom: 1px solid #dee2e6; }
+    .tab-btn { flex: 1; padding: 9px 3px; border: none; background: transparent; font-size: 11.5px; font-weight: 700; color: #555; cursor: pointer; border-bottom: 2px solid transparent; }
+    .tab-btn.active { color: #0a66c2; background: #fff; border-bottom-color: #0a66c2; }
+    .tab-panel { display: none; padding: 12px 14px; }
+    .tab-panel.active { display: block; }
+    label { font-size: 11px; font-weight: 700; display: block; margin-bottom: 3px; color: #444; }
+    input, select, textarea { width: 100%; padding: 6px 8px; margin-bottom: 8px; border: 1px solid #ccc; border-radius: 5px; font-size: 12px; font-family: inherit; }
+    textarea { resize: vertical; }
+    .row-group { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+    .row-group select { flex: 1; margin-bottom: 0; }
+    .row-group button { width: auto; padding: 6px 9px; margin-bottom: 0; background: #e9ecef; color: #333; border: 1px solid #ccc; border-radius: 5px; cursor: pointer; font-weight: 600; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    button.action-btn { width: 100%; padding: 8px; border: none; border-radius: 6px; font-weight: 600; font-size: 12px; cursor: pointer; margin-bottom: 6px; }
+    .btn-primary { background: #0a66c2; color: #fff; }
+    .btn-success { background: #057642; color: #fff; }
+    .btn-danger { background: #c92a2a; color: #fff; display: none; }
+    .btn-secondary { background: #e9ecef; color: #333; }
+    .chk-row { display: flex; align-items: center; gap: 6px; font-size: 12px; margin-bottom: 6px; }
+    .chk-row input { width: auto; margin: 0; }
+    .chk-row label { margin: 0; font-weight: 500; color: #222; }
+    #status { font-size: 11px; color: #057642; min-height: 15px; text-align: center; padding: 0 12px 10px; line-height: 1.3; }
+
+    .new-role-box {
+      display: none;
+      background: #f8f9fa;
+      border: 1px solid #ced4da;
+      border-radius: 6px;
+      padding: 8px;
+      margin-bottom: 8px;
+    }
+    .new-role-box.open { display: block; }
+
+    /* Estilos específicos pestaña X-Ray */
+    .chips-box {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      max-height: 118px;
+      overflow-y: auto;
+      padding: 6px;
+      border: 1px solid #dee2e6;
+      border-radius: 6px;
+      background: #f8f9fa;
+      margin-bottom: 8px;
+    }
+    .chip-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 7px;
+      border-radius: 14px;
+      border: 1px solid #ced4da;
+      background: #fff;
+      font-size: 11px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .chip-item.checked {
+      background: #e7f3ff;
+      border-color: #0a66c2;
+      color: #0a66c2;
+      font-weight: 600;
+    }
+    .chip-item input {
+      width: auto;
+      margin: 0;
+      accent-color: #0a66c2;
+      cursor: pointer;
+    }
+    .xray-preview {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      background: #f1f3f5;
+      color: #111;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="tab-run">▶ Ejecutar</button>
+    <button class="tab-btn" data-tab="tab-xray">🔍 X-Ray</button>
+    <button class="tab-btn" data-tab="tab-db">📋 Vacante</button>
+    <button class="tab-btn" data-tab="tab-cfg">⚙️ Config</button>
+  </div>
+
+  <!-- PESTAÑA 1: EJECUCIÓN Y LOTE -->
+  <div id="tab-run" class="tab-panel active">
+    <label for="sheet-select">Pestaña / Role:</label>
+    <div class="row-group">
+      <select id="sheet-select"><option value="">Cargando...</option></select>
+      <button type="button" id="btn-refresh" title="Recargar pestañas">↻</button>
+    </div>
+
+    <div class="grid-3">
+      <div>
+        <label for="row-start">Fila inicio:</label>
+        <input type="number" id="row-start" min="2" placeholder="Ej: 2">
+      </div>
+      <div>
+        <label for="row-end">Fila fin:</label>
+        <input type="number" id="row-end" min="2" placeholder="Vacío=1">
+      </div>
+      <div>
+        <label for="min-match">Match mín %:</label>
+        <input type="number" id="min-match" min="0" max="100" value="75">
+      </div>
+    </div>
+
+    <div class="chk-row">
+      <input type="checkbox" id="chk-close-tab" checked>
+      <label for="chk-close-tab">Cerrar pestañas al terminar (si no es modo prueba)</label>
+    </div>
+
+    <div class="chk-row">
+      <input type="checkbox" id="chk-connect">
+      <label for="chk-connect">Si cumple Match: Conectar + Nota (Mensaje Corto)</label>
+    </div>
+
+    <div class="chk-row">
+      <input type="checkbox" id="chk-recruiter">
+      <label for="chk-recruiter">Si cumple Match: Abrir Recruiter y guardar en proyecto</label>
+    </div>
+
+    <div class="chk-row" style="background:#fff3cd; padding:5px 7px; border-radius:5px;">
+      <input type="checkbox" id="chk-dry-run" checked>
+      <label for="chk-dry-run" style="color:#856404; font-weight:700;">🛡️ Modo Prueba (rellena todo pero NO envía invitación)</label>
+    </div>
+    
+    <button id="btn-start" class="action-btn btn-primary">▶ Iniciar Evaluación</button>
+    <button id="btn-stop" class="action-btn btn-danger">⏹ Detener Lote</button>
+  </div>
+
+  <!-- PESTAÑA 2: X-RAY SEARCH / BOOLEAN BUILDER -->
+  <div id="tab-xray" class="tab-panel">
+    <label for="xray-role-select">Pestaña / Role:</label>
+    <div class="row-group">
+      <select id="xray-role-select"><option value="">Cargando...</option></select>
+      <button type="button" id="xray-btn-refresh" title="Recargar pestañas">↻</button>
+      <span id="xray-cache-badge" style="font-size:10px; color:#0a66c2; white-space:nowrap;">Sin analizar</span>
+    </div>
+
+    <label for="xray-country">País / Subdominio LinkedIn (editable para LATAM):</label>
+    <div class="row-group">
+      <select id="xray-country">
+        <option value="global">🌎 Global / LATAM (site:linkedin.com/in/)</option>
+        <option value="co">🇨🇴 Colombia (site:co.linkedin.com/in/)</option>
+        <option value="mx">🇲🇽 México (site:mx.linkedin.com/in/)</option>
+        <option value="ar">🇦🇷 Argentina (site:ar.linkedin.com/in/)</option>
+        <option value="cl">🇨🇱 Chile (site:cl.linkedin.com/in/)</option>
+        <option value="pe">🇵🇪 Perú (site:pe.linkedin.com/in/)</option>
+        <option value="br">🇧🇷 Brasil (site:br.linkedin.com/in/)</option>
+        <option value="uy">🇺🇾 Uruguay (site:uy.linkedin.com/in/)</option>
+        <option value="cr">🇨🇷 Costa Rica (site:cr.linkedin.com/in/)</option>
+        <option value="ec">🇪🇨 Ecuador (site:ec.linkedin.com/in/)</option>
+        <option value="pa">🇵🇦 Panamá (site:pa.linkedin.com/in/)</option>
+        <option value="es">🇪🇸 España (site:es.linkedin.com/in/)</option>
+        <option value="us">🇺🇸 Estados Unidos (site:www.linkedin.com/in/)</option>
+      </select>
+      <button type="button" id="btn-xray-analyze" title="Extraer / Regenerar características con IA">✨ IA</button>
+    </div>
+
+    <label>Títulos / Roles sugeridos (opcional):</label>
+    <div id="xray-roles-box" class="chips-box">
+      <span style="font-size:11px; color:#666;">Pulsa ✨ IA para extraer términos de la JD</span>
+    </div>
+
+    <label>Skills / Tecnologías clave (marca las que quieras buscar):</label>
+    <div id="xray-skills-box" class="chips-box">
+      <span style="font-size:11px; color:#666;">Aquí aparecerán las tecnologías (ej. .NET, React, AKS)</span>
+    </div>
+
+    <label for="xray-query">Búsqueda X-Ray generada (puedes editarla manual):</label>
+    <textarea id="xray-query" class="xray-preview" rows="3" placeholder='site:co.linkedin.com/in/ ".NET" "React" "AKS"'></textarea>
+
+    <div class="grid-2">
+      <button type="button" id="btn-xray-copy" class="action-btn btn-secondary">📋 Copiar búsqueda</button>
+      <button type="button" id="btn-xray-open" class="action-btn btn-success">🔎 Abrir en Google</button>
+    </div>
+  </div>
+
+  <!-- PESTAÑA 3: EDICIÓN DE AGENTE_DB -->
+  <div id="tab-db" class="tab-panel">
+    <label for="db-role-select">Editando Role:</label>
+    <div class="row-group">
+      <select id="db-role-select"><option value="">Cargando...</option></select>
+      <button type="button" id="btn-toggle-new-role" title="Crear nueva vacante / pestaña">+ Nueva</button>
+      <button type="button" id="db-btn-refresh" title="Recargar pestañas">↻</button>
+    </div>
+
+    <div id="new-role-box" class="new-role-box">
+      <label for="new-role-name">Nombre de nueva vacante (crea pestaña y fila en AGENTE_DB):</label>
+      <input type="text" id="new-role-name" placeholder="Ej: Project_Manager">
+      <button type="button" id="btn-create-role" class="action-btn btn-success" style="margin-bottom:0;">➕ Crear Vacante y Pestaña</button>
+    </div>
+
+    <label for="db-proyecto">Nombre Proyecto (Recruiter):</label>
+    <input type="text" id="db-proyecto" placeholder="Nombre exacto del proyecto">
+
+    <label for="db-jd">Job Description (JD):</label>
+    <textarea id="db-jd" rows="4"></textarea>
+
+    <label for="db-mensaje">Mensaje Corto (Nota invitación):</label>
+    <textarea id="db-mensaje" rows="2"></textarea>
+
+    <label for="db-mensaje-largo">Mensaje Largo (InMail / Proyecto):</label>
+    <textarea id="db-mensaje-largo" rows="2"></textarea>
+
+    <button id="btn-save-db" class="action-btn btn-primary">💾 Guardar cambios en AGENTE_DB</button>
+  </div>
+
+  <!-- PESTAÑA 4: CONFIGURACIÓN -->
+  <div id="tab-cfg" class="tab-panel">
+    <label for="webhook-url">URL Google Apps Script:</label>
+    <input type="text" id="webhook-url" placeholder="https://script.google.com/macros/s/.../exec">
+
+    <label for="openai-key">OpenAI API Key:</label>
+    <input type="password" id="openai-key" placeholder="sk-proj-...">
+
+    <button id="btn-save-cfg" class="action-btn btn-secondary">Guardar Configuración</button>
+  </div>
+
+  <div id="status"></div>
+  <script src="popup.js"></script>
+</body>
+</html>
