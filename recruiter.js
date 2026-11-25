@@ -50,7 +50,7 @@ function mostrarEstadoRecruiter(texto, color = "#0a66c2") {
   badge.textContent = texto;
 }
 
-function ocultarEstadoRecruiter(delayMs = 4000) {
+function ocultarEstadoRecruiter(delayMs = 4500) {
   setTimeout(() => {
     document.getElementById("recruiter-bot-status")?.remove();
   }, delayMs);
@@ -91,7 +91,7 @@ async function esperarBotonGuardarSinRendirse() {
   const regexGuardar = /^(Guardar en (un )?proyecto|Save to (a )?project)$/i;
   const inicio = Date.now();
   let tiempoConPerfilListoMs = 0;
-  const maxEsperaTotalMs = 180000; // Hasta 3 minutos si la red o Recruiter están lentos
+  const maxEsperaTotalMs = 180000;
 
   while (Date.now() - inicio < maxEsperaTotalMs) {
     const { recruiterTask } = await chrome.storage.local.get(["recruiterTask"]);
@@ -111,7 +111,6 @@ async function esperarBotonGuardarSinRendirse() {
     } else {
       tiempoConPerfilListoMs += 600;
       mostrarEstadoRecruiter(`⏳ Buscando 'Guardar en proyecto' (${segs}s)...`, "#0a66c2");
-      // Solo si el perfil ya terminó de renderizar por completo y lleva 25s estable sin el botón
       if (tiempoConPerfilListoMs >= 25000) {
         return null;
       }
@@ -121,6 +120,98 @@ async function esperarBotonGuardarSinRendirse() {
   }
 
   return null;
+}
+
+// ============================================================================
+// VALIDACIÓN DE HISTORIAL: NO GUARDAR SI ALGUIEN != ALYN CASMEN CONTACTÓ < 30 DÍAS
+// ============================================================================
+function parsearFechaActividad(texto) {
+  // Soporta formatos dd/mm/yyyy o dd-mm-yyyy
+  const matchSlash = texto.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/);
+  if (matchSlash) {
+    const dia = parseInt(matchSlash[1], 10);
+    const mes = parseInt(matchSlash[2], 10) - 1;
+    const anio = parseInt(matchSlash[3], 10);
+    const fecha = new Date(anio, mes, dia, 12, 0, 0);
+    if (!isNaN(fecha.getTime())) return fecha;
+  }
+
+  // Soporta formato yyyy-mm-dd
+  const matchIso = texto.match(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/);
+  if (matchIso) {
+    const anio = parseInt(matchIso[1], 10);
+    const mes = parseInt(matchIso[2], 10) - 1;
+    const dia = parseInt(matchIso[3], 10);
+    const fecha = new Date(anio, mes, dia, 12, 0, 0);
+    if (!isNaN(fecha.getTime())) return fecha;
+  }
+
+  return null;
+}
+
+function esContactoRecienteDeTercero() {
+  const seccionActividad = buscarElementoPorTexto(
+    "section, div, article",
+    /Actividad en Recruiter|Recruiter activity/i,
+    false
+  );
+  if (seccionActividad) {
+    seccionActividad.scrollIntoView?.({ block: "nearest", behavior: "instant" });
+  }
+
+  const contenedor = seccionActividad || document.body;
+  const textoBloque = contenedor.innerText || "";
+  const lineas = textoBloque
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  const regexAccionContacto =
+    /(enviado.*(mensaje|inmail)|mensaje\s*inmail|inmail|contactado|invitación\s*enviada|sent.*(message|inmail)|messaged|reached\s*out|invited)/i;
+
+  const ahora = new Date();
+  const msPorDia = 1000 * 60 * 60 * 24;
+  const limiteDias = 30;
+
+  // Agrupar líneas cercanas que correspondan a una misma actividad con fecha
+  for (let i = 0; i < lineas.length; i++) {
+    const ventana = [lineas[i], lineas[i + 1] || "", lineas[i + 2] || ""].join(" ");
+    const fechaEvento = parsearFechaActividad(ventana);
+    if (!fechaEvento) continue;
+
+    if (!regexAccionContacto.test(ventana)) continue;
+
+    // Ignorar explícitamente si la actividad es de Alyn Casmen o del Hiring Assistant
+    const esAlyn = /\balyn\s+casmen\b/i.test(ventana);
+    const esHiringAssistant = /\bhiring\s+assistant\b/i.test(ventana);
+    if (esAlyn || esHiringAssistant) continue;
+
+    const diasTranscurridos = (ahora.getTime() - fechaEvento.getTime()) / msPorDia;
+    if (diasTranscurridos >= -1 && diasTranscurridos < limiteDias) {
+      const nombreMatch = ventana.match(
+        /^([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){0,3})\s+(?:ha\s+enviado|envió|sent|messaged|contactó)/i
+      );
+      const quien = nombreMatch ? nombreMatch[1].trim() : "otro usuario";
+      return {
+        bloqueado: true,
+        quien,
+        dias: Math.max(0, Math.floor(diasTranscurridos)),
+        fechaTexto: fechaEvento.toLocaleDateString("es-MX")
+      };
+    }
+  }
+
+  return { bloqueado: false };
+}
+
+async function verificarRestriccionContactoPrevio() {
+  // Dar un breve respiro para que "Actividad en Recruiter" termine de renderizar
+  for (let intento = 0; intento < 4; intento++) {
+    const resultado = esContactoRecienteDeTercero();
+    if (resultado.bloqueado) return resultado;
+    await esperar(500);
+  }
+  return { bloqueado: false };
 }
 
 function clicReal(el) {
@@ -213,11 +304,21 @@ async function guardarEnProyectoExistente() {
       return;
     }
 
+    // Revisar historial antes de guardar: no guardar si alguien != Alyn Casmen contactó < 30 días
+    const restriccion = await verificarRestriccionContactoPrevio();
+    if (restriccion.bloqueado) {
+      mostrarEstadoRecruiter(
+        `⛔ No guardado: contactado por ${restriccion.quien} (${restriccion.fechaTexto})`,
+        "#c92a2a"
+      );
+      await esperar(2500);
+      return;
+    }
+
     const botonGuardar = nodoGuardar.closest("button, a, div[role='button']") || nodoGuardar;
     clicReal(botonGuardar);
     await esperar(1800);
 
-    // Seleccionar radio de proyecto existente si el modal muestra opción Crear vs Existente
     const opcionExistente = await esperarElementoPorTexto(
       'label, span, div[role="radio"], button',
       /(Seleccionar (un )?proyecto existente|Proyecto existente|Select (an )?existing project|Existing project)/i,
@@ -252,7 +353,9 @@ async function guardarEnProyectoExistente() {
       const inputsVisibles = querySelectorAllDeep(
         'input[type="text"], input[type="search"], input[role="combobox"], input:not([type])',
         contenedorModal
-      ).filter((inp) => esVisible(inp) && !inp.disabled && inp.type !== "radio" && inp.type !== "checkbox");
+      ).filter(
+        (inp) => esVisible(inp) && !inp.disabled && inp.type !== "radio" && inp.type !== "checkbox"
+      );
 
       inputProyecto =
         inputsVisibles.find((inp) =>
@@ -341,7 +444,7 @@ async function guardarEnProyectoExistente() {
     console.error("[Recruiter Bot] Error guardando en proyecto de Recruiter:", err);
     mostrarEstadoRecruiter(`❌ Error Recruiter: ${err.message.slice(0, 30)}`, "#c92a2a");
   } finally {
-    ocultarEstadoRecruiter(3500);
+    ocultarEstadoRecruiter(4000);
     await enviarMensajeExtensionConReintento({
       action: "RECRUITER_DONE",
       guardado: guardadoExitoso

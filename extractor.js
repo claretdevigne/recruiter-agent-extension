@@ -339,13 +339,40 @@ async function conectarConNotaCorta(mensajeCorto, nombreCompleto, modoPrueba, ac
   const primerNombre = (nombreCompleto || "").split(" ")[0] || "";
   const textoNota = mensajeCorto.replace(/\{nombre\}/gi, primerNombre).slice(0, 300);
 
+  const simularClicCompleto = (el) => {
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const clientX = rect.left + rect.width / 2;
+    const clientY = rect.top + rect.height / 2;
+    const opts = {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      clientX,
+      clientY
+    };
+    el.focus?.();
+    el.dispatchEvent(new PointerEvent("pointerdown", opts));
+    el.dispatchEvent(new MouseEvent("mousedown", opts));
+    el.dispatchEvent(new PointerEvent("pointerup", opts));
+    el.dispatchEvent(new MouseEvent("mouseup", opts));
+    el.click();
+  };
+
   actualizarEstado("⏳ Buscando botón Conectar...", "#0a66c2");
 
   const topCard = document.querySelector("main section") || document.querySelector("main") || document;
-  const esBotonConectar = (el) => {
-    const txt = (el.innerText || "").trim();
-    const aria = (el.getAttribute("aria-label") || "").trim();
+
+  const esNodoConectar = (el) => {
+    if (!el) return false;
+    if (el.closest("#modal-manual-connect") || el.closest("#modal-manual-match")) return false;
+    const rect = el.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return false;
+
+    const txt = (el.innerText || "").replace(/\s+/g, " ").trim();
+    const aria = (el.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim();
     const href = el.getAttribute("href") || "";
+
     return (
       href.includes("custom-invite") ||
       /^(Conectar|Connect)$/i.test(txt) ||
@@ -353,37 +380,13 @@ async function conectarConNotaCorta(mensajeCorto, nombreCompleto, modoPrueba, ac
     );
   };
 
-  let btnConectar = Array.from(topCard.querySelectorAll("button, a")).find(esBotonConectar);
-
-  if (!btnConectar) {
-    const btnMas = Array.from(topCard.querySelectorAll("button")).find((b) => {
-      const txt = (b.innerText || "").trim();
-      const aria = (b.getAttribute("aria-label") || "").trim();
-      return /^(Más|More)$/i.test(txt) || /^(Más acciones|More actions)$/i.test(aria);
-    });
-
-    if (btnMas) {
-      btnMas.click();
-      await esperar(1500);
-      btnConectar = Array.from(
-        document.querySelectorAll(
-          '[role="menu"] button, [role="menu"] a, [role="menu"] div[role="button"], .artdeco-dropdown__content button, .artdeco-dropdown__content a, .artdeco-dropdown__content div[role="button"]'
-        )
-      ).find(esBotonConectar);
-    }
-  }
-
-  if (!btnConectar) {
-    actualizarEstado("⚠️ No apareció Conectar (¿ya conectado?)", "#856404");
-    await esperar(2500);
-    return false;
-  }
-
-  btnConectar.click();
-
   const buscarEnTodoElDOM = (predicate) => {
     const revisarRaiz = (root) => {
-      const nodos = Array.from(root.querySelectorAll("button, a, div[role='button'], textarea"));
+      const nodos = Array.from(
+        root.querySelectorAll(
+          "a, button, div[role='button'], div[role='menuitem'], li, span, p, textarea"
+        )
+      );
       const hallado = nodos.find(predicate);
       if (hallado) return hallado;
       for (const el of root.querySelectorAll("*")) {
@@ -397,11 +400,79 @@ async function conectarConNotaCorta(mensajeCorto, nombreCompleto, modoPrueba, ac
     return revisarRaiz(document);
   };
 
+  let btnConectar = Array.from(topCard.querySelectorAll("button, a")).find(esNodoConectar);
+
+  if (!btnConectar) {
+    actualizarEstado("⏳ Revisando menú de los 3 puntos...", "#0a66c2");
+
+    const candidatosTresPuntos = Array.from(topCard.querySelectorAll("button"));
+    const btnMas =
+      candidatosTresPuntos.find((b) => {
+        const txt = (b.innerText || "").trim();
+        const aria = (b.getAttribute("aria-label") || "").trim();
+        return (
+          /^(Más|More)$/i.test(txt) ||
+          /(más acciones|más opciones|more actions|more options)/i.test(aria)
+        );
+      }) ||
+      candidatosTresPuntos.find((b) => {
+        const txt = (b.innerText || "").replace(/\s+/g, "").trim();
+        const aria = (b.getAttribute("aria-label") || "").trim();
+        const rect = b.getBoundingClientRect();
+        const esBotonIconoPequeno =
+          rect.width > 0 && rect.width <= 60 && rect.height > 0 && rect.height <= 60;
+        return (
+          esBotonIconoPequeno &&
+          (txt === "•••" || txt === "..." || /more|más/i.test(aria) || b.querySelector("svg"))
+        );
+      });
+
+    if (btnMas) {
+      simularClicCompleto(btnMas);
+
+      // Esperar en bucle hasta 3.5s a que el menú desplegable renderice "Conectar"
+      for (let i = 0; i < 7; i++) {
+        await esperar(500);
+        btnConectar = buscarEnTodoElDOM(esNodoConectar);
+        if (btnConectar) break;
+      }
+    }
+  }
+
+  if (!btnConectar) {
+    actualizarEstado("⚠️ No apareció Conectar (¿ya conectado?)", "#856404");
+    await esperar(2500);
+    return false;
+  }
+
+  actualizarEstado("⏳ Pulsando Conectar...", "#0a66c2");
+
+  // Si es un enlace directo a custom-invite, navegar o hacer clic directo en el <a>
+  const linkDirecto =
+    btnConectar.closest("a[href*='custom-invite']") ||
+    (btnConectar.tagName === "A" ? btnConectar : null);
+  const itemInteractivo =
+    linkDirecto ||
+    btnConectar.closest('div[role="button"], div[role="menuitem"], button, li') ||
+    btnConectar;
+
+  simularClicCompleto(itemInteractivo);
+  if (itemInteractivo !== btnConectar) {
+    simularClicCompleto(btnConectar);
+  }
+  // Respaldo de teclado (Enter) por si el artdeco-dropdown usa manejador de teclado/accesibilidad
+  itemInteractivo.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Enter", code: "Enter", keyCode: 13, bubbles: true })
+  );
+
   let btnNota = null;
-  for (let intento = 0; intento < 8; intento++) {
+  for (let intento = 0; intento < 10; intento++) {
     await esperar(500);
     btnNota = buscarEnTodoElDOM((b) => {
       if (b.tagName === "TEXTAREA") return false;
+      if (b.closest("#modal-manual-connect") || b.closest("#modal-manual-match")) return false;
+      const rect = b.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return false;
       const txt = (b.innerText || "").trim();
       const aria = (b.getAttribute("aria-label") || "").trim();
       return (
@@ -418,7 +489,8 @@ async function conectarConNotaCorta(mensajeCorto, nombreCompleto, modoPrueba, ac
     return false;
   }
 
-  btnNota.click();
+  const objetivoClickNota = btnNota.closest('button, a, div[role="button"]') || btnNota;
+  simularClicCompleto(objetivoClickNota);
   await esperar(1200);
 
   const textarea = buscarEnTodoElDOM(
@@ -447,6 +519,9 @@ async function conectarConNotaCorta(mensajeCorto, nombreCompleto, modoPrueba, ac
   if (!modoPrueba) {
     const btnEnviar = buscarEnTodoElDOM((b) => {
       if (b.tagName === "TEXTAREA") return false;
+      if (b.closest("#modal-manual-connect") || b.closest("#modal-manual-match")) return false;
+      const rect = b.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return false;
       const txt = (b.innerText || "").trim();
       const aria = (b.getAttribute("aria-label") || "").trim();
       return (
@@ -456,7 +531,7 @@ async function conectarConNotaCorta(mensajeCorto, nombreCompleto, modoPrueba, ac
       );
     });
     if (btnEnviar) {
-      btnEnviar.click();
+      simularClicCompleto(btnEnviar.closest("button") || btnEnviar);
       actualizarEstado("✔ Invitación enviada con nota", "#057642");
       await esperar(1600);
       return true;
